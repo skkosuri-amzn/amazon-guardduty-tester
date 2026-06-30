@@ -1,6 +1,6 @@
 ---
 name: guardduty-investigation
-description: Run Amazon GuardDuty AI-Powered Investigations (Preview) — analyze a specific finding, an account, or an organization, then summarize risk, confidence, MITRE ATT&CK techniques, and recommended actions. Use when a user wants to investigate a GuardDuty finding/account/org, triage an alert, or understand whether a finding is a real threat. Drives the AWS API MCP Server directly; no local CLI required.
+description: Run Amazon GuardDuty AI-Powered Investigations (Preview) — analyze a specific finding, an account, or an organization, then summarize risk, confidence, MITRE ATT&CK techniques, and recommended actions. Also recalls past investigations — show the latest summary, or extract its countermeasures/remediations — without creating a new one. Use when a user wants to investigate a GuardDuty finding/account/org, triage an alert, understand whether a finding is a real threat, or review/summarize a prior investigation. Drives the AWS API MCP Server directly; no local CLI required.
 ---
 
 # GuardDuty AI-Powered Investigation
@@ -15,6 +15,20 @@ create→poll loop). It does not depend on any local script.
 - "Is this finding a real threat?" / "Triage this alert"
 - "Analyze the threat posture of account `<id>`" or "...my organization"
 - After generating findings with the GuardDuty Tester, to investigate them
+
+### Recall (read past results — do NOT create a new investigation)
+
+These prompts retrieve an *existing* investigation. Route them to the
+**Recall** workflow below, never to create:
+
+- "Show me the last/latest investigation summary"
+- "From the last investigation, list the countermeasures / remediations / recommended actions"
+- "What did the previous investigation find?" / "Summarize my recent investigations"
+- "Get investigation `<uuid>`"
+
+Creating wastes preview quota and returns a *different* analysis than the one
+the user asked about — so when a prompt references a prior/last/previous
+investigation, recall it; do not create.
 
 ## Hard constraints (verify before acting)
 
@@ -80,6 +94,28 @@ create→poll loop). It does not depend on any local script.
 - Finding: `"Investigate finding <32-hex-id>"`
 - Account: `"Analyze findings in account with id <12-digit-id>"`
 - Org:     `"Analyze findings in my organization"`
+
+## Recall workflow (retrieve a past investigation — no quota cost)
+
+Use this instead of Steps 4–5 when the prompt references the last/previous/a
+specific investigation. Listing and getting do NOT consume quota.
+
+1. **List, newest first** — `call_aws` →
+   `aws guardduty list-investigations --detector-id <id> --max-results 50 --sort-criteria '{"AttributeName":"START_TIME","OrderBy":"DESC"}'`
+   The first element is the most recent. For "latest *completed*", pick the
+   first item whose `Status` is `COMPLETED` (skip `RUNNING`/`FAILED`). The list
+   already carries `RiskLevel`, `Confidence`, and `Title` for a quick summary.
+2. **Get full details** — `call_aws` →
+   `aws guardduty get-investigation --detector-id <id> --investigation-id <inv-id>`
+   The summaries from list do NOT include `Summary`/`countermeasures`; you must
+   `get` the specific id to see observations, MITRE techniques, and
+   countermeasures.
+3. **Report** — render per Step 6. For "list the countermeasures/remediations",
+   parse `Summary` and present only the `countermeasures` array (each item's
+   `description` and any `command`/`cliCommand`).
+
+Fallback CLI: `gd_investigator.py latest` (newest), `latest --completed`
+(newest completed), `get <uuid>`, or `list --sort START_TIME --order DESC`.
 
 ### Step 5 — Create + poll (use run_script for the loop)
 Prefer a single `run_script` so create and polling happen in one round-trip:
